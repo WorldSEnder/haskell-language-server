@@ -1,5 +1,7 @@
 {-# LANGUAGE DeriveAnyClass      #-}
 {-# LANGUAGE DeriveGeneric       #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE GADTs               #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -12,6 +14,7 @@ module Ide.Plugin.Tactic
   ( descriptor
   , tacticTitle
   , TacticCommand (..)
+  , TacticParams(..)
   ) where
 
 import           Control.Arrow
@@ -35,7 +38,6 @@ import           Development.IDE.Spans.LocalBindings (getDefiningBindings)
 import           Development.Shake (Action)
 import           DynFlags (xopt)
 import qualified FastString
-import           GHC.Generics (Generic)
 import           GHC.LanguageExtensions.Type (Extension (LambdaCase))
 import           Ide.Plugin (mkLspCommand)
 import           Ide.Plugin.Tactic.Context
@@ -55,12 +57,12 @@ import           OccName
 descriptor :: PluginId -> PluginDescriptor
 descriptor plId = (defaultPluginDescriptor plId)
     { pluginCommands
-        = fmap (\tc ->
+        = fmap (\tc -> withSomeTacticCommand tc $ \tac -> withSerializableContext tac $
             PluginCommand
               (tcCommandId tc)
               (tacticDesc $ tcCommandName tc)
-              (tacticCmd $ commandTactic tc))
-              [minBound .. maxBound]
+              (tacticCmd tac))
+            [minBound .. maxBound]
     , pluginCodeActionProvider = Just codeActionProvider
     }
 
@@ -88,35 +90,36 @@ tcCommandName = T.pack . show
 -- | Mapping from tactic commands to their contextual providers. See 'provide',
 -- 'filterGoalType' and 'filterBindingType' for the nitty gritty.
 commandProvider :: TacticCommand -> TacticProvider
-commandProvider Auto  = provide Auto ""
+commandProvider Auto  = provide AutoS ()
 commandProvider Intros =
   filterGoalType isFunction $
-    provide Intros ""
+    provide IntrosS ()
 commandProvider Destruct =
   filterBindingType destructFilter $ \occ _ ->
-    provide Destruct $ T.pack $ occNameString occ
+    provide DestructS $ T.pack $ occNameString occ
 commandProvider Homomorphism =
   filterBindingType homoFilter $ \occ _ ->
-    provide Homomorphism $ T.pack $ occNameString occ
+    provide HomomorphismS $ T.pack $ occNameString occ
 commandProvider DestructLambdaCase =
   requireExtension LambdaCase $
     filterGoalType (isJust . lambdaCaseable) $
-      provide DestructLambdaCase ""
+      provide DestructLambdaCaseS ()
 commandProvider HomomorphismLambdaCase =
   requireExtension LambdaCase $
     filterGoalType ((== Just True) . lambdaCaseable) $
-      provide HomomorphismLambdaCase ""
+      provide HomomorphismLambdaCaseS ()
 
 
 ------------------------------------------------------------------------------
 -- | A mapping from tactic commands to actual tactics for refinery.
-commandTactic :: TacticCommand -> OccName -> TacticsM ()
-commandTactic Auto         = const auto
-commandTactic Intros       = const intros
-commandTactic Destruct     = destruct
-commandTactic Homomorphism = homo
-commandTactic DestructLambdaCase     = const destructLambdaCase
-commandTactic HomomorphismLambdaCase = const homoLambdaCase
+commandTactic :: KnownTacticCommand tc => proxy tc -> TacticContext tc -> TacticsM ()
+commandTactic p = case ktcSing p of
+  AutoS                   -> const auto
+  IntrosS                 -> const intros
+  DestructS               -> destruct . mkVarOcc . T.unpack
+  HomomorphismS           -> homo . mkVarOcc . T.unpack
+  DestructLambdaCaseS     -> const destructLambdaCase
+  HomomorphismLambdaCaseS -> const homoLambdaCase
 
 
 ------------------------------------------------------------------------------
@@ -163,11 +166,11 @@ codeActions = List . fmap CACodeAction
 ------------------------------------------------------------------------------
 -- | Terminal constructor for providing context-sensitive tactics. Tactics
 -- given by 'provide' are always available.
-provide :: TacticCommand -> T.Text -> TacticProvider
-provide tc name _ plId uri range _ = do
-  let title = tacticTitle tc name
-      params = TacticParams { file = uri , range = range , var_name = name }
-  cmd <- mkLspCommand plId (tcCommandId tc) title (Just [toJSON params])
+provide :: (KnownTacticCommand tc, ToJSON (TacticContext tc)) => proxy tc -> TacticContext tc -> TacticProvider
+provide tc args _ plId uri range _ = do
+  let title = tacticTitle tc args
+      params = TacticParams { file = uri , range = range , tac_args = args }
+  cmd <- mkLspCommand plId (tcCommandId $ ktcValue tc) title (Just [toJSON params])
   pure
     $ pure
     $ CACodeAction
@@ -211,14 +214,6 @@ filterBindingType p tp dflags plId uri range jdg =
           False -> pure []
 
 
-data TacticParams = TacticParams
-    { file :: Uri -- ^ Uri of the file to fill the hole in
-    , range :: Range -- ^ The range of the hole
-    , var_name :: T.Text
-    }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-
 ------------------------------------------------------------------------------
 -- | Find the last typechecked module, and find the most specific span, as well
 -- as the judgement at the given range.
@@ -258,18 +253,14 @@ judgementForHole state nfp range = do
   pure (resulting_range, mkFirstJudgement hyps goal, ctx, dflags)
 
 
-
-tacticCmd :: (OccName -> TacticsM ()) -> CommandFunction TacticParams
-tacticCmd tac lf state (TacticParams uri range var_name)
+tacticCmd :: KnownTacticCommand tc => proxy tc -> CommandFunction (TacticParams (TacticContext tc))
+tacticCmd tac lf state (TacticParams uri range tacargs)
   | Just nfp <- uriToNormalizedFilePath $ toNormalizedUri uri =
       fromMaybeT (Right Null, Nothing) $ do
         (range', jdg, ctx, dflags) <- judgementForHole state nfp range
         let span = rangeToRealSrcSpan (fromNormalizedFilePath nfp) range'
         pm <- MaybeT $ useAnnotatedSource "tacticsCmd" state nfp
-        case runTactic ctx jdg
-              $ tac
-              $ mkVarOcc
-              $ T.unpack var_name of
+        case runTactic ctx jdg $ commandTactic tac tacargs of
           Left err ->
             pure $ (, Nothing)
               $ Left
