@@ -19,6 +19,7 @@ module Ide.Plugin.Tactic.Types
   ) where
 
 import Control.Monad.Reader
+import ConLike
 import Data.Function
 import Data.Map (Map)
 import Data.Set (Set)
@@ -101,7 +102,7 @@ data TacticError
   | NoProgress
   | NoApplicableTactic
   | AlreadyDestructed OccName
-  | IncorrectDataCon DataCon
+  | IncorrectDataCon ConLike
   deriving stock (Eq)
 
 instance Show TacticError where

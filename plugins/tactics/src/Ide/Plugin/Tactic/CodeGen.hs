@@ -18,16 +18,24 @@ import Ide.Plugin.Tactic.Types
 import Ide.Plugin.Tactic.GHC
 import Name
 import ConLike
+import PatSyn
 import Type hiding (Var)
 
 class Instantiable a where
+  -- | Returns the original TyCon this thing builds
+  origTyCon :: a -> Maybe TyCon
   -- | Returns just the instantiated value argument types of the 'a' (excluding dictionary arguments)
   instOrigArgTys :: a -> [Type] -> [Type]
 
 instance Instantiable ConLike where
+  origTyCon (RealDataCon dc) = origTyCon dc
+  origTyCon (PatSynCon pc) =
+    let (_, _, _, _, _, rt) = patSynSig pc
+    in tyConAppTyCon_maybe rt
   instOrigArgTys = conLikeInstOrigArgTys
 
 instance Instantiable DataCon where
+  origTyCon = Just . dataConTyCon
   instOrigArgTys = dataConInstOrigArgTys'
 
 destructMatches
@@ -104,17 +112,18 @@ destructLambdaCase' f jdg = do
 ------------------------------------------------------------------------------
 -- | Construct a data con with subgoals for each field.
 buildDataCon
-    :: Judgement
-    -> DataCon            -- ^ The data con to build
-    -> [Type]             -- ^ Type arguments for the data con
+    :: (Instantiable c, NamedThing c)
+    => Judgement
+    -> c            -- ^ The data con to build
+    -> [Type]       -- ^ Type arguments for the data con
     -> RuleM (LHsExpr GhcPs)
 buildDataCon jdg dc apps = do
-  let args = dataConInstOrigArgTys' dc apps
+  let args = instOrigArgTys dc apps
   sgs <- traverse (newSubgoal . flip withNewGoal jdg . CType) args
   pure
     . noLoc
     . foldl' (@@)
-        (HsVar noExtField $ noLoc $ Unqual $ nameOccName $ dataConName dc)
+        (HsVar noExtField $ noLoc $ Unqual $ getOccName dc)
     $ fmap unLoc sgs
 
 

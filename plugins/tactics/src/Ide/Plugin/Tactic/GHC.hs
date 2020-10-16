@@ -2,8 +2,11 @@
 
 module Ide.Plugin.Tactic.GHC where
 
-import Data.Maybe (isJust)
+import           Refinery.Tactic (choice)
+import ConLike
+import Data.Maybe (isJust, maybeToList)
 import DataCon
+import Ide.Plugin.Tactic.Types
 import TcType
 import TyCoRep
 import TyCon
@@ -69,10 +72,34 @@ lambdaCaseable (splitFunTy_maybe -> Just (arg, res))
 lambdaCaseable _ = Nothing
 
 
+data ConLikeGroup = ConLikeGroup
+  { clgCons :: ![ConLike] -- ^ the constructors or patterns in this group
+  , clgComplete :: !Bool  -- ^ should this group be treated as generating an exhaustive match?
+  }
+
 ------------------------------------------------------------------------------
 -- | What data-constructor, if any, does the type have?
+-- Additional returns the type arguments to the TyCon of the type
 tyDataCons :: Type -> Maybe ([DataCon], [Type])
 tyDataCons g = do
   (tc, apps) <- splitTyConApp_maybe g
   pure $ (tyConDataCons tc, apps)
 
+------------------------------------------------------------------------------
+-- | What groups of con-likes are sensible to use when pattern matching on the argument?
+-- Also returns the type arguments to the TyCon of the type
+tyPatternMatchGroups :: Type -> ExtractM [(ConLikeGroup, [Type])]
+tyPatternMatchGroups t = pure $ conGroup where
+  conGroup = do
+    (dcs, apps) <- maybeToList $ tyDataCons t
+    pure (ConLikeGroup (RealDataCon <$> dcs) True, apps)
+
+------------------------------------------------------------------------------
+-- | What groups of con-likes are sensible to use when constructing the argument?
+-- Also returns the type arguments to the TyCon of the type
+tyConLikes :: Type -> ExtractM [(ConLike, [Type])]
+tyConLikes t = pure $ conGroup where
+  conGroup = do
+    (dcs, apps) <- maybeToList $ tyDataCons t
+    dc <- dcs
+    pure (RealDataCon dc, apps)

@@ -14,6 +14,7 @@ import           Control.Applicative
 import           Control.Monad.Except (throwError)
 import           Control.Monad.State.Class
 import           Control.Monad.State.Strict (StateT(..), runStateT)
+import           ConLike
 import           Data.Function
 import           Data.List
 import qualified Data.Map as M
@@ -158,17 +159,17 @@ split = do
   case tyDataCons $ unCType g of
     Nothing -> throwError $ GoalMismatch "getGoalTyCon" g
     Just (dcs, _) -> do
-      choice $ fmap splitDataCon dcs
+      choice $ fmap (splitDataCon . RealDataCon) dcs
 
 
 ------------------------------------------------------------------------------
 -- | Attempt to instantiate the given data constructor to solve the goal.
-splitDataCon :: DataCon -> TacticsM ()
+splitDataCon :: ConLike -> TacticsM ()
 splitDataCon dc = rule $ \jdg -> do
   let g = jGoal jdg
   case splitTyConApp_maybe $ unCType g of
     Just (tc, apps) -> do
-      case elem dc $ tyConDataCons tc of
+      case origTyCon dc == Just tc of
         True -> buildDataCon jdg dc apps
         False -> throwError $ IncorrectDataCon dc
     Nothing -> throwError $ GoalMismatch "splitDataCon" g
@@ -187,7 +188,7 @@ splitDataCon' dcn = do
       let mdc = find ((== dcn) . getOccName) dcs
       case mdc of
         Nothing -> throwError $ GoalMismatch tacname g
-        Just dc -> splitDataCon dc
+        Just dc -> splitDataCon $ RealDataCon dc
 
 
 ------------------------------------------------------------------------------
