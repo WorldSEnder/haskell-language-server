@@ -15,41 +15,51 @@ import Ide.Plugin.Tactic.Judgements
 import Ide.Plugin.Tactic.Machinery
 import Ide.Plugin.Tactic.Naming
 import Ide.Plugin.Tactic.Types
+import Ide.Plugin.Tactic.GHC
 import Name
+import ConLike
 import Type hiding (Var)
 
+class Instantiable a where
+  -- | Returns just the instantiated value argument types of the 'a' (excluding dictionary arguments)
+  instOrigArgTys :: a -> [Type] -> [Type]
+
+instance Instantiable ConLike where
+  instOrigArgTys = conLikeInstOrigArgTys
+
+instance Instantiable DataCon where
+  instOrigArgTys = dataConInstOrigArgTys'
 
 destructMatches
-    :: (DataCon -> Judgement -> Rule)
+    :: (Instantiable c, NamedThing c)
+    => (c -> Judgement -> Rule)
        -- ^ How to construct each match
     -> (Judgement -> Judgement)
        -- ^ How to derive each match judgement
-    -> CType
-       -- ^ Type being destructed
+    -> [c]
+       -- ^ Constructors being instantiated
+    -> [Type]
+       -- ^ instantiated type arguments to the result TyCon of the constructors
     -> Judgement
+       -- ^ goal judgement
     -> RuleM [RawMatch]
-destructMatches f f2 t jdg = do
+destructMatches f f2 cons apps jdg = do
   let hy = jHypothesis jdg
       g  = jGoal jdg
-  case splitTyConApp_maybe $ unCType t of
-    Nothing -> throwError $ GoalMismatch "destruct" g
-    Just (tc, apps) -> do
-      let dcs = tyConDataCons tc
-      case dcs of
-        [] -> throwError $ GoalMismatch "destruct" g
-        _ -> for dcs $ \dc -> do
-          let args = dataConInstOrigArgTys' dc apps
-          names <- mkManyGoodNames hy args
+  case cons of
+    [] -> throwError $ GoalMismatch "destruct" g
+    _ -> for cons $ \dc -> do
+      let args = instOrigArgTys dc apps
+      names <- mkManyGoodNames hy args
 
-          let pat :: Pat GhcPs
-              pat = conP (fromString $ occNameString $ nameOccName $ dataConName dc)
-                  $ fmap bvar' names
-              j = f2
-                $ introducingPat (zip names $ coerce args)
-                $ withNewGoal g jdg
-          sg <- f dc j
-          pure $ match [pat] $ unLoc sg
-
+      let pat :: Pat GhcPs
+          pat = conP (fromString $ occNameString $ getOccName dc)
+              $ fmap bvar' names
+          j = f2
+            $ introducingPat (zip names $ coerce args)
+            $ withNewGoal g jdg
+      sg <- f dc j
+      pure $ match [pat] $ unLoc sg
 
 -- | Essentially same as 'dataConInstOrigArgTys' in GHC,
 --   but we need some tweaks in GHC >= 8.8.
@@ -57,7 +67,7 @@ destructMatches f f2 t jdg = do
 --   we just filter out non-class types in the result.
 dataConInstOrigArgTys' :: DataCon -> [Type] -> [Type]
 dataConInstOrigArgTys' con ty =
-    let tys0 = dataConInstArgTys con ty
+    let tys0 = dataConInstOrigArgTys con ty
     in filter (maybe True (not . isClassTyCon) . tyConAppTyCon_maybe) tys0
 
 ------------------------------------------------------------------------------
@@ -69,9 +79,11 @@ destruct' f term jdg = do
   let hy = jHypothesis jdg
   case find ((== term) . fst) $ toList hy of
     Nothing -> throwError $ UndefinedHypothesis term
-    Just (_, t) ->
-      fmap noLoc $ case' (var' term) <$>
-        destructMatches f (destructing term) t jdg
+    Just (_, t)
+      | Just (cs, apps) <- tyDataCons $ unCType t
+      -> fmap noLoc $ case' (var' term) <$>
+             destructMatches f (destructing term) cs apps jdg
+    Just (_, t) -> throwError $ GoalMismatch "destruct" t
 
 
 ------------------------------------------------------------------------------
@@ -81,9 +93,11 @@ destructLambdaCase' :: (DataCon -> Judgement -> Rule) -> Judgement -> Rule
 destructLambdaCase' f jdg = do
   let g  = jGoal jdg
   case splitFunTy_maybe (unCType g) of
-    Just (arg, _) | isAlgType arg ->
-      fmap noLoc $ lambdaCase <$>
-        destructMatches f id (CType arg) jdg
+    Just (arg, _)
+      | isAlgType arg
+      , Just (cs, apps) <- tyDataCons arg
+      -> fmap noLoc $ lambdaCase <$>
+             destructMatches f id cs apps jdg
     _ -> throwError $ GoalMismatch "destructLambdaCase'" g
 
 

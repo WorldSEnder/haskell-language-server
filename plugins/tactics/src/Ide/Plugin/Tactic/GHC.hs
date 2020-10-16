@@ -71,8 +71,8 @@ lambdaCaseable _ = Nothing
 
 ------------------------------------------------------------------------------
 -- | What data-constructor, if any, does the type have?
-tyDataCons :: Type -> Maybe [DataCon]
+tyDataCons :: Type -> Maybe ([DataCon], [Type])
 tyDataCons g = do
-  (tc, _) <- splitTyConApp_maybe g
-  pure $ tyConDataCons tc
+  (tc, apps) <- splitTyConApp_maybe g
+  pure $ (tyConDataCons tc, apps)
 

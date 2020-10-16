@@ -58,22 +58,22 @@ runTactic
     :: Context
     -> Judgement
     -> TacticsM ()       -- ^ Tactic to use
-    -> Either [TacticError] (LHsExpr GhcPs)
+    -> IO (Either [TacticError] (LHsExpr GhcPs))
 runTactic ctx jdg t =
     let skolems = tyCoVarsOfTypeWellScoped $ unCType $ jGoal jdg
         tacticState = mempty { ts_skolems = skolems }
-    in case partitionEithers
-          . flip runReader ctx
+    in (fmap partitionEithers
+          . flip runReaderT ctx
           . unExtractM
-          $ runTacticTWithState t jdg tacticState of
-      (errs, []) -> Left $ errs
+          $ runTacticTWithState t jdg tacticState) >>= \case
+      (errs, []) -> pure $ Left $ errs
       (_, solns) -> do
         -- TODO(sandy): remove this trace sometime
         traceM $ intercalate "\n" $ fmap (unsafeRender . fst) $ solns
         case sortBy (comparing $ Down . uncurry scoreSolution . snd) solns of
-          (res : _) -> Right $ fst res
+          (res : _) -> pure $ Right $ fst res
           -- guaranteed to not be empty
-          _ -> Left []
+          _ -> pure $ Left []
 
 
 scoreSolution :: TacticState -> [Judgement] -> Int

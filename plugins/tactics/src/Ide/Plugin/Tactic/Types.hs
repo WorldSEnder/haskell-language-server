@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleInstances              #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving     #-}
 {-# LANGUAGE MultiParamTypeClasses          #-}
+{-# LANGUAGE RankNTypes                     #-}
 {-# LANGUAGE TypeSynonymInstances           #-}
 
 module Ide.Plugin.Tactic.Types
@@ -23,6 +24,7 @@ import Data.Map (Map)
 import Data.Set (Set)
 import Development.IDE.GHC.Compat
 import Development.IDE.Types.Location
+import TcRnTypes
 import GHC.Generics
 import Ide.Plugin.Tactic.Debug
 import OccName
@@ -80,7 +82,7 @@ data Judgement' a = Judgement
 type Judgement = Judgement' CType
 
 
-newtype ExtractM a = ExtractM { unExtractM :: Reader Context a }
+newtype ExtractM a = ExtractM { unExtractM :: ReaderT Context IO a }
     deriving (Functor, Applicative, Monad, MonadReader Context)
 
 ------------------------------------------------------------------------------
@@ -144,6 +146,7 @@ data Context = Context
     -- ^ The functions currently being defined
   , ctxModuleFuncs :: [(OccName, CType)]
     -- ^ Everything defined in the current module
+  , ctxRunDsM :: forall r. TcM r -> IO r
+    -- ^ Run a type checking action in the context of the hole
   }
-  deriving stock (Eq, Ord)
 

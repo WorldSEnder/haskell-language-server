@@ -14,7 +14,6 @@ module Ide.Plugin.Tactic
   , TacticCommand (..)
   ) where
 
-import           Control.Arrow
 import           Control.Monad
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Maybe
@@ -32,7 +31,6 @@ import           Development.IDE.Core.Service (runAction)
 import           Development.IDE.Core.Shake (useWithStale, IdeState (..))
 import           Development.IDE.GHC.Compat
 import           Development.IDE.GHC.Error (realSrcSpanToRange)
-import           Development.IDE.Spans.LocalBindings (getDefiningBindings)
 import           Development.Shake (Action)
 import           DynFlags (xopt)
 import qualified FastString
@@ -95,7 +93,7 @@ commandProvider Intros =
     provide Intros ""
 commandProvider Split =
   filterGoalType (isJust . algebraicTyCon) $
-    foldMapGoalType (F.fold . tyDataCons) $ \dc ->
+    foldMapGoalType (F.fold . fmap fst . tyDataCons) $ \dc ->
       provide Split $ T.pack $ occNameString $ getOccName dc
 commandProvider Destruct =
   filterBindingType destructFilter $ \occ _ ->
@@ -263,11 +261,8 @@ judgementForHole state nfp range = do
 
   resulting_range <- liftMaybe $ toCurrentRange amapping $ realSrcSpanToRange rss
   (tcmod, _) <- MaybeT $ runIde state $ useWithStale TypeCheck nfp
-  let tcg = fst $ tm_internals_ $ tmrModule tcmod
-      ctx = mkContext
-              (mapMaybe (sequenceA . (occName *** coerce))
-                $ getDefiningBindings binds rss)
-              tcg
+  (env, _) <- MaybeT $ runIde state $ useWithStale GhcSession nfp
+  let ctx = mkContext env binds tcmod rss
       hyps = hypothesisFromBindings rss binds
   pure (resulting_range, mkFirstJudgement hyps goal, ctx, dflags)
 
@@ -280,9 +275,9 @@ tacticCmd tac lf state (TacticParams uri range var_name)
         (range', jdg, ctx, dflags) <- judgementForHole state nfp range
         let span = rangeToRealSrcSpan (fromNormalizedFilePath nfp) range'
         pm <- MaybeT $ useAnnotatedSource "tacticsCmd" state nfp
-        case runTactic ctx jdg
+        (lift $ runTactic ctx jdg
               $ tac
-              $ T.unpack var_name of
+              $ T.unpack var_name) >>= \case
           Left err ->
             pure $ (, Nothing)
               $ Left

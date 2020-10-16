@@ -157,7 +157,7 @@ split = do
   let g = jGoal jdg
   case tyDataCons $ unCType g of
     Nothing -> throwError $ GoalMismatch "getGoalTyCon" g
-    Just dcs -> do
+    Just (dcs, _) -> do
       choice $ fmap splitDataCon dcs
 
 
@@ -183,7 +183,7 @@ splitDataCon' dcn = do
   let g = jGoal jdg
   case tyDataCons $ unCType g of
     Nothing -> throwError $ GoalMismatch tacname g
-    Just dcs -> do
+    Just (dcs, _) -> do
       let mdc = find ((== dcn) . getOccName) dcs
       case mdc of
         Nothing -> throwError $ GoalMismatch tacname g
