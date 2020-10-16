@@ -118,6 +118,7 @@ tests = testGroup
   , goldenTest "GoldenGADTDestruct.hs"      7 17 Destruct "gadt"
   , goldenTest "GoldenGADTAuto.hs"          7 13 Auto ""
   , goldenTest "GoldenSplitPair.hs"         2 11 Split "(,)"
+  , goldenTest "GoldenGADTDestructEx.hs"    7 10 Destruct "x"
   ]
 
 
