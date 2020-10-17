@@ -17,6 +17,7 @@ module Ide.Plugin.Tactic
 import           Control.Monad
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Maybe
+import           Control.Monad.Trans.Reader (asks, ReaderT(..))
 import           Data.Aeson
 import           Data.Coerce
 import qualified Data.Foldable as F
@@ -66,11 +67,20 @@ descriptor plId = (defaultPluginDescriptor plId)
 tacticDesc :: T.Text -> T.Text
 tacticDesc name = "fill the hole using the " <> name <> " tactic"
 
+data TacticProviderContext
+  = TacticProviderContext
+  { tpcDynFlags :: DynFlags
+  , tpcPlugin :: PluginId
+  , tpcFileUri :: Uri
+  , tpcRange :: Range
+  , tpcTactcCtx :: Context
+  , tpcJudgement :: Judgement
+  }
+
 ------------------------------------------------------------------------------
 -- | A 'TacticProvider' is a way of giving context-sensitive actions to the LS
 -- UI.
-type TacticProvider = DynFlags -> PluginId -> Uri -> Range -> Judgement -> IO [CAResult]
-
+type TacticProvider = ReaderT TacticProviderContext IO [CAResult]
 
 ------------------------------------------------------------------------------
 -- | Construct a 'CommandId'
@@ -93,7 +103,7 @@ commandProvider Intros =
     provide Intros ""
 commandProvider Split =
   filterGoalType (isJust . algebraicTyCon) $
-    foldMapGoalType (F.fold . fmap fst . tyDataCons) $ \dc ->
+    provideThroughExtract tyConLikes $ flip msumMap $ \(dc, _) ->
       provide Split $ T.pack $ occNameString $ getOccName dc
 commandProvider Destruct =
   filterBindingType destructFilter $ \occ _ ->
@@ -147,15 +157,18 @@ codeActionProvider :: CodeActionProvider
 codeActionProvider _conf state plId (TextDocumentIdentifier uri) range _ctx
   | Just nfp <- uriToNormalizedFilePath $ toNormalizedUri uri =
       fromMaybeT (Right $ List []) $ do
-        (_, jdg, _, dflags) <- judgementForHole state nfp range
+        (_, jdg, ctx, dflags) <- judgementForHole state nfp range
+        let tcpContext = TacticProviderContext
+              { tpcDynFlags = dflags
+              , tpcPlugin = plId
+              , tpcFileUri = uri
+              , tpcRange = range
+              , tpcTactcCtx = ctx
+              , tpcJudgement = jdg
+              }
         actions <- lift $
           -- This foldMap is over the function monoid.
-          foldMap commandProvider [minBound .. maxBound]
-            dflags
-            plId
-            uri
-            range
-            jdg
+          foldMap (runReaderT . commandProvider) [minBound .. maxBound] tcpContext
         pure $ Right $ List actions
 codeActionProvider _ _ _ _ _ _ = pure $ Right $ codeActions []
 
@@ -168,10 +181,13 @@ codeActions = List . fmap CACodeAction
 -- | Terminal constructor for providing context-sensitive tactics. Tactics
 -- given by 'provide' are always available.
 provide :: TacticCommand -> T.Text -> TacticProvider
-provide tc name _ plId uri range _ = do
+provide tc name = do
+  plId <- asks tpcPlugin
+  range <- asks tpcRange
+  uri <- asks tpcFileUri
   let title = tacticTitle tc name
       params = TacticParams { file = uri , range = range , var_name = name }
-  cmd <- mkLspCommand plId (tcCommandId tc) title (Just [toJSON params])
+  cmd <- lift $ mkLspCommand plId (tcCommandId tc) title (Just [toJSON params])
   pure
     $ pure
     $ CACodeAction
@@ -183,28 +199,38 @@ provide tc name _ plId uri range _ = do
 -- | Restrict a 'TacticProvider', making sure it appears only when the given
 -- predicate holds for the goal.
 requireExtension :: Extension -> TacticProvider -> TacticProvider
-requireExtension ext tp dflags plId uri range jdg =
+requireExtension ext tp = do
+  dflags <- asks tpcDynFlags
   case xopt ext dflags of
-    True  -> tp dflags plId uri range jdg
+    True  -> tp
     False -> pure []
 
 
 ------------------------------------------------------------------------------
 -- | Create a 'TacticProvider' for each occurance of an 'a' in the foldable container
 -- extracted from the goal type. Useful instantiations for 't' include 'Maybe' or '[]'.
-foldMapGoalType :: Foldable t => (Type -> t a) -> (a -> TacticProvider) -> TacticProvider
-foldMapGoalType f tpa dflags plId uri range jdg =
-  foldMap tpa (f $ unCType $ jGoal jdg) dflags plId uri range jdg
+msumMap :: (Foldable t) => t a -> (a -> TacticProvider) -> TacticProvider
+msumMap ta f = F.foldr (\a b -> liftM2 (++) (f a) b) (pure []) ta
 
 
 ------------------------------------------------------------------------------
 -- | Restrict a 'TacticProvider', making sure it appears only when the given
 -- predicate holds for the goal.
 filterGoalType :: (Type -> Bool) -> TacticProvider -> TacticProvider
-filterGoalType p tp dflags plId uri range jdg =
+filterGoalType p tp = do
+  jdg <- asks tpcJudgement
   case p $ unCType $ jGoal jdg of
-    True  -> tp dflags plId uri range jdg
+    True  -> tp
     False -> pure []
+
+
+------------------------------------------------------------------------------
+-- | Run an ExtractM action before providing code actions
+provideThroughExtract :: (Type -> ExtractM a) -> (a -> TacticProvider) -> TacticProvider
+provideThroughExtract ext f = do
+  ctx <- asks tpcTactcCtx
+  jdg <- asks tpcJudgement
+  lift (runExtractM ctx $ ext $ unCType $ jGoal jdg) >>= f
 
 
 ------------------------------------------------------------------------------
@@ -214,12 +240,13 @@ filterBindingType
     :: (Type -> Type -> Bool)  -- ^ Goal and then binding types.
     -> (OccName -> Type -> TacticProvider)
     -> TacticProvider
-filterBindingType p tp dflags plId uri range jdg =
+filterBindingType p tp = do
+  jdg <- asks tpcJudgement
   let hy = jHypothesis jdg
       g  = jGoal jdg
    in fmap join $ for (M.toList hy) $ \(occ, CType ty) ->
         case p (unCType g) ty of
-          True  -> tp occ ty dflags plId uri range jdg
+          True  -> tp occ ty
           False -> pure []
 
 

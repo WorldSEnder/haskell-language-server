@@ -2,7 +2,6 @@
 
 module Ide.Plugin.Tactic.GHC where
 
-import           Refinery.Tactic (choice)
 import ConLike
 import Data.Maybe (isJust, maybeToList)
 import DataCon

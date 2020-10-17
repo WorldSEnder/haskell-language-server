@@ -86,6 +86,9 @@ type Judgement = Judgement' CType
 newtype ExtractM a = ExtractM { unExtractM :: ReaderT Context IO a }
     deriving (Functor, Applicative, Monad, MonadReader Context)
 
+runExtractM :: Context -> ExtractM a -> IO a
+runExtractM cxt e = runReaderT (unExtractM e) cxt 
+
 ------------------------------------------------------------------------------
 -- | Orphan instance for producing holes when attempting to solve tactics.
 instance MonadExtract (LHsExpr GhcPs) ExtractM where
