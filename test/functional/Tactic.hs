@@ -107,6 +107,11 @@ tests = testGroup
       "T2.hs" 11 25
       [ (not, DestructLambdaCase, "")
       ]
+  , mkTest
+      "Doesn't suggest IO, i.e. constructors that are not in scope"
+      "T2.hs" 27 13
+      [ (not, Split, "IO")
+      ]
   , goldenTest "GoldenIntros.hs"            2 8  Intros ""
   , goldenTest "GoldenEitherAuto.hs"        2 11 Auto   ""
   , goldenTest "GoldenJoinCont.hs"          4 12 Auto   ""
@@ -143,9 +148,10 @@ mkTest name fp line col ts =
     let titles = mapMaybe codeActionTitle actions
     for_ ts $ \(f, tc, var) -> do
       let title = tacticTitle tc var
+      let failureDesc = if f True then "Expected" else "Didn't expect"
       liftIO $
         f (elem title titles)
-          @? ("Expected a code action with title " <> T.unpack title)
+          @? (failureDesc <> " a code action with title " <> T.unpack title <> " but found " <> show (T.unpack <$> titles))
 
 
 goldenTest :: FilePath -> Int -> Int -> TacticCommand -> Text -> TestTree

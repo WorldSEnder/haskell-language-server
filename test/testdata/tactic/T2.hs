@@ -22,3 +22,6 @@ suggestCons = _
 
 suggestInt :: Int
 suggestInt = _
+
+suggestIO :: IO Int
+suggestIO = _

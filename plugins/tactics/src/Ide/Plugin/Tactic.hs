@@ -289,7 +289,7 @@ judgementForHole state nfp range = do
   resulting_range <- liftMaybe $ toCurrentRange amapping $ realSrcSpanToRange rss
   (tcmod, _) <- MaybeT $ runIde state $ useWithStale TypeCheck nfp
   (env, _) <- MaybeT $ runIde state $ useWithStale GhcSession nfp
-  let ctx = mkContext env binds tcmod rss
+  let ctx = mkContext env binds tcmod rss dflags
       hyps = hypothesisFromBindings rss binds
   pure (resulting_range, mkFirstJudgement hyps goal, ctx, dflags)
 

@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveGeneric         #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeSynonymInstances  #-}
 {-# LANGUAGE ViewPatterns          #-}
@@ -35,6 +36,7 @@ import           Refinery.Tactic
 import           Refinery.Tactic.Internal
 import           TcType
 import           Type hiding (Var)
+import Control.Monad.Trans.Class (lift)
 
 
 
@@ -182,13 +184,11 @@ splitDataCon' dcn = do
   let tacname = "splitDataCon'(" ++ unsafeRender dcn ++ ")"
   jdg <- goal
   let g = jGoal jdg
-  case tyDataCons $ unCType g of
-    Nothing -> throwError $ GoalMismatch tacname g
-    Just (dcs, _) -> do
-      let mdc = find ((== dcn) . getOccName) dcs
+  (lift $ tyConLikes $ unCType g) >>= \dcs -> do
+      let mdc = find ((== dcn) . getOccName) (fst <$> dcs)
       case mdc of
         Nothing -> throwError $ GoalMismatch tacname g
-        Just dc -> splitDataCon $ RealDataCon dc
+        Just dc -> splitDataCon dc
 
 
 ------------------------------------------------------------------------------

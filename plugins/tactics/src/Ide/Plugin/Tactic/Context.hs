@@ -19,9 +19,9 @@ import TcRnTypes
 import TcRnMonad (initTcWithGbl)
 
 
-mkContext :: HscEnvEq -> Bindings -> TcModuleResult -> RealSrcSpan -> Context
-mkContext hsenv binds tcmod rss
-  = Context locals globals runTcM
+mkContext :: HscEnvEq -> Bindings -> TcModuleResult -> RealSrcSpan -> DynFlags -> Context
+mkContext hsenv binds tcmod rss dynFlags
+  = Context locals globals runTcM dynFlags
   where
     tcg = fst $ tm_internals_ $ tmrModule tcmod  
     locals  = mapMaybe (sequenceA . (occName *** coerce))
@@ -56,6 +56,9 @@ getModuleHypothesis :: MonadReader Context m => m [(OccName, CType)]
 getModuleHypothesis = asks ctxModuleFuncs
 
 runDsM :: (MonadReader Context m, MonadIO m) => DsM r -> m r
-runDsM ds = do
-  runner <- asks ctxRunDsM
-  liftIO . runner $ initDsTc ds
+runDsM = runTcM . initDsTc
+
+runTcM :: (MonadReader Context m, MonadIO m) => TcM r -> m r
+runTcM tc = do
+  runner <- asks ctxRunTcM
+  liftIO . runner $ tc

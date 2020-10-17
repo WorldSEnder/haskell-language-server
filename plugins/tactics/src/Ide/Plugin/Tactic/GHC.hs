@@ -2,11 +2,16 @@
 
 module Ide.Plugin.Tactic.GHC where
 
+import Control.Monad
 import ConLike
 import Data.Maybe (isJust, maybeToList)
 import DataCon
+import Ide.Plugin.Tactic.Context
 import Ide.Plugin.Tactic.Types
+import Name
+import RdrName
 import TcType
+import TcRnMonad
 import TyCoRep
 import TyCon
 import Type
@@ -96,9 +101,25 @@ tyPatternMatchGroups t = pure $ conGroup where
 ------------------------------------------------------------------------------
 -- | What groups of con-likes are sensible to use when constructing the argument?
 -- Also returns the type arguments to the TyCon of the type
+{-
+do
+  _conLikes <- fmap join $ for (maybeToList $ splitTyConApp_maybe t) $ \(a, apps) -> do
+    conlikes <- runDsM $ do
+      pnames <- dsGetCompleteMatches a
+      for (pnames >>= completeMatchConLikes) dsLookupConLike
+    for conlikes $ \cl -> do
+      return $ (cl, apps)
+-}
 tyConLikes :: Type -> ExtractM [(ConLike, [Type])]
-tyConLikes t = pure $ conGroup where
-  conGroup = do
+tyConLikes t = filterM candFilter candidates
+  where
+  candidates = do
     (dcs, apps) <- maybeToList $ tyDataCons t
     dc <- dcs
     pure (RealDataCon dc, apps)
+  candFilter :: (ConLike, [Type]) -> ExtractM Bool
+  candFilter (c, _) = runTcM $ do
+    glblEnv <- getGlobalRdrEnv
+    let isSyntax = isBuiltInSyntax (conLikeName c)
+    let isInScope = isJust (lookupGRE_Name glblEnv (conLikeName c))
+    return $ isSyntax || isInScope

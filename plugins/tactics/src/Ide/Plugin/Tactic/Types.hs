@@ -84,7 +84,7 @@ type Judgement = Judgement' CType
 
 
 newtype ExtractM a = ExtractM { unExtractM :: ReaderT Context IO a }
-    deriving (Functor, Applicative, Monad, MonadReader Context)
+    deriving (Functor, Applicative, Monad, MonadReader Context, MonadIO)
 
 runExtractM :: Context -> ExtractM a -> IO a
 runExtractM cxt e = runReaderT (unExtractM e) cxt 
@@ -150,7 +150,8 @@ data Context = Context
     -- ^ The functions currently being defined
   , ctxModuleFuncs :: [(OccName, CType)]
     -- ^ Everything defined in the current module
-  , ctxRunDsM :: forall r. TcM r -> IO r
+  , ctxRunTcM :: forall r. TcM r -> IO r
     -- ^ Run a type checking action in the context of the hole
+  , ctxDynFlags :: DynFlags
   }
 
