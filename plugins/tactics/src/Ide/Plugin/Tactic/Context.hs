@@ -10,18 +10,16 @@ import Data.Coerce
 import Data.Maybe (mapMaybe)
 import Development.IDE.Core.RuleTypes (TcModuleResult, tmrModule)
 import Development.IDE.GHC.Compat
-import Development.IDE.GHC.Util (HscEnvEq, hscEnv)
 import Development.IDE.Spans.LocalBindings (Bindings, getDefiningBindings)
-import DsMonad (initDsTc)
 import Ide.Plugin.Tactic.Types
 import OccName
 import TcRnTypes
-import TcRnMonad (initTcWithGbl)
+import RdrName (GlobalRdrEnv)
 
 
-mkContext :: HscEnvEq -> Bindings -> TcModuleResult -> RealSrcSpan -> DynFlags -> Context
-mkContext hsenv binds tcmod rss dynFlags
-  = Context locals globals runTcM dynFlags
+mkContext :: Bindings -> TcModuleResult -> RealSrcSpan -> DynFlags -> Context
+mkContext binds tcmod rss dynFlags
+  = Context locals globals glblRdrEnv dynFlags
   where
     tcg = fst $ tm_internals_ $ tmrModule tcmod  
     locals  = mapMaybe (sequenceA . (occName *** coerce))
@@ -32,9 +30,7 @@ mkContext hsenv binds tcmod rss dynFlags
             $ bagToList
             $ tcg_binds
             $ tcg
-    runTcM = \tcr -> do
-      (_, Just r) <- initTcWithGbl (hscEnv hsenv) tcg rss tcr
-      pure r
+    glblRdrEnv = tcg_rdr_env tcg
 
 
 splitId :: Id -> (OccName, CType)
@@ -55,10 +51,5 @@ getCurrentDefinitions = asks $ fmap fst . ctxDefiningFuncs
 getModuleHypothesis :: MonadReader Context m => m [(OccName, CType)]
 getModuleHypothesis = asks ctxModuleFuncs
 
-runDsM :: (MonadReader Context m, MonadIO m) => DsM r -> m r
-runDsM = runTcM . initDsTc
-
-runTcM :: (MonadReader Context m, MonadIO m) => TcM r -> m r
-runTcM tc = do
-  runner <- asks ctxRunTcM
-  liftIO . runner $ tc
+getGobalReaderEnv :: MonadReader Context m => m GlobalRdrEnv
+getGobalReaderEnv = asks ctxGlobalReader

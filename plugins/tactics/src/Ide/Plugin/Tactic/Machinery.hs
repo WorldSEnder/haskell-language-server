@@ -62,7 +62,7 @@ runTactic
 runTactic ctx jdg t =
     let skolems = tyCoVarsOfTypeWellScoped $ unCType $ jGoal jdg
         tacticState = mempty { ts_skolems = skolems }
-    in (fmap partitionEithers
+    in (pure . partitionEithers
           . runExtractM ctx
           $ runTacticTWithState t jdg tacticState) >>= \case
       (errs, []) -> pure $ Left $ errs

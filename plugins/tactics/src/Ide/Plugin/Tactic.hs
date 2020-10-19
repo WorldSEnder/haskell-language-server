@@ -230,7 +230,7 @@ provideThroughExtract :: (Type -> ExtractM a) -> (a -> TacticProvider) -> Tactic
 provideThroughExtract ext f = do
   ctx <- asks tpcTactcCtx
   jdg <- asks tpcJudgement
-  lift (runExtractM ctx $ ext $ unCType $ jGoal jdg) >>= f
+  f $ runExtractM ctx $ ext $ unCType $ jGoal jdg
 
 
 ------------------------------------------------------------------------------
@@ -288,8 +288,7 @@ judgementForHole state nfp range = do
 
   resulting_range <- liftMaybe $ toCurrentRange amapping $ realSrcSpanToRange rss
   (tcmod, _) <- MaybeT $ runIde state $ useWithStale TypeCheck nfp
-  (env, _) <- MaybeT $ runIde state $ useWithStale GhcSession nfp
-  let ctx = mkContext env binds tcmod rss dflags
+  let ctx = mkContext binds tcmod rss dflags
       hyps = hypothesisFromBindings rss binds
   pure (resulting_range, mkFirstJudgement hyps goal, ctx, dflags)
 

@@ -11,7 +11,6 @@ import Ide.Plugin.Tactic.Types
 import Name
 import RdrName
 import TcType
-import TcRnMonad
 import TyCoRep
 import TyCon
 import Type
@@ -118,8 +117,8 @@ tyConLikes t = filterM candFilter candidates
     dc <- dcs
     pure (RealDataCon dc, apps)
   candFilter :: (ConLike, [Type]) -> ExtractM Bool
-  candFilter (c, _) = runTcM $ do
-    glblEnv <- getGlobalRdrEnv
+  candFilter (c, _) = do
+    glblEnv <- getGobalReaderEnv
     let isSyntax = isBuiltInSyntax (conLikeName c)
     let isInScope = isJust (lookupGRE_Name glblEnv (conLikeName c))
     return $ isSyntax || isInScope

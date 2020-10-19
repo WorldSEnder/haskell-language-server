@@ -25,12 +25,12 @@ import Data.Map (Map)
 import Data.Set (Set)
 import Development.IDE.GHC.Compat
 import Development.IDE.Types.Location
-import TcRnTypes
 import GHC.Generics
 import Ide.Plugin.Tactic.Debug
 import OccName
 import Refinery.Tactic
 import Type
+import RdrName (GlobalRdrEnv)
 
 
 ------------------------------------------------------------------------------
@@ -83,11 +83,11 @@ data Judgement' a = Judgement
 type Judgement = Judgement' CType
 
 
-newtype ExtractM a = ExtractM { unExtractM :: ReaderT Context IO a }
-    deriving (Functor, Applicative, Monad, MonadReader Context, MonadIO)
+newtype ExtractM a = ExtractM { unExtractM :: Reader Context a }
+    deriving (Functor, Applicative, Monad, MonadReader Context)
 
-runExtractM :: Context -> ExtractM a -> IO a
-runExtractM cxt e = runReaderT (unExtractM e) cxt 
+runExtractM :: Context -> ExtractM a -> a
+runExtractM cxt e = runReader (unExtractM e) cxt 
 
 ------------------------------------------------------------------------------
 -- | Orphan instance for producing holes when attempting to solve tactics.
@@ -150,7 +150,7 @@ data Context = Context
     -- ^ The functions currently being defined
   , ctxModuleFuncs :: [(OccName, CType)]
     -- ^ Everything defined in the current module
-  , ctxRunTcM :: forall r. TcM r -> IO r
+  , ctxGlobalReader :: GlobalRdrEnv
     -- ^ Run a type checking action in the context of the hole
   , ctxDynFlags :: DynFlags
   }
